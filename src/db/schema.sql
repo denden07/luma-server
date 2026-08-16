@@ -6,10 +6,19 @@ CREATE TABLE IF NOT EXISTS events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(255) NOT NULL,
   date TIMESTAMP WITH TIME ZONE NOT NULL,
-  guest_limit INTEGER DEFAULT 50,
+  guest_limit INTEGER NOT NULL DEFAULT 30 CHECK (guest_limit BETWEEN 1 AND 30),
+  photo_limit INTEGER NOT NULL DEFAULT 20 CHECK (photo_limit BETWEEN 1 AND 20),
+  start_time TIMESTAMP WITH TIME ZONE,
+  end_time TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Keep local databases created by earlier versions compatible with this schema.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS photo_limit INTEGER NOT NULL DEFAULT 20;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS start_time TIMESTAMP WITH TIME ZONE;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS end_time TIMESTAMP WITH TIME ZONE;
+ALTER TABLE events ALTER COLUMN guest_limit SET DEFAULT 30;
 
 -- Participants table
 CREATE TABLE IF NOT EXISTS participants (
@@ -54,5 +63,6 @@ END;
 $$ language 'plpgsql';
 
 -- Trigger for events table
+DROP TRIGGER IF EXISTS update_events_updated_at ON events;
 CREATE TRIGGER update_events_updated_at BEFORE UPDATE ON events
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

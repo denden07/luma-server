@@ -12,10 +12,10 @@ router.get('/:eventId/participants', async (req, res) => {
       'SELECT * FROM participants WHERE event_id = $1 ORDER BY created_at ASC',
       [eventId]
     );
-    res.json(result.rows);
+    return res.json(result.rows);
   } catch (error) {
     console.error('Error fetching participants:', error);
-    res.status(500).json({ error: 'Failed to fetch participants' });
+    return res.status(500).json({ error: 'Failed to fetch participants' });
   }
 });
 
@@ -27,6 +27,25 @@ router.post('/:eventId/participants', async (req, res) => {
     
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
+    }
+
+    const eventResult = await pool.query<{ guest_limit: number }>(
+      'SELECT guest_limit FROM events WHERE id = $1',
+      [eventId]
+    );
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    // Existing client-generated IDs may retry safely without consuming another guest slot.
+    if (!id) {
+      const participantCount = await pool.query<{ count: string }>(
+        'SELECT COUNT(*)::text AS count FROM participants WHERE event_id = $1',
+        [eventId]
+      );
+      if (Number(participantCount.rows[0].count) >= eventResult.rows[0].guest_limit) {
+        return res.status(409).json({ error: 'This event has reached its guest limit' });
+      }
     }
     
     const result = await pool.query<Participant>(
@@ -43,10 +62,10 @@ router.post('/:eventId/participants', async (req, res) => {
       return res.status(409).json({ error: 'Participant belongs to a different event' });
     }
     
-    res.status(201).json(result.rows[0]);
+    return res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating participant:', error);
-    res.status(500).json({ error: 'Failed to create participant' });
+    return res.status(500).json({ error: 'Failed to create participant' });
   }
 });
 

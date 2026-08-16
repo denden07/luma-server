@@ -8,6 +8,52 @@ import type { Photo } from '../types.js';
 
 const router = express.Router();
 
+interface EventUploadPolicy {
+  photo_limit: number;
+  start_time: Date | null;
+  end_time: Date | null;
+}
+
+async function getPhotoUploadError(eventId: string, participantId: string, photoId: string): Promise<string | null> {
+  const eventResult = await pool.query<EventUploadPolicy>(
+    'SELECT photo_limit, start_time, end_time FROM events WHERE id = $1',
+    [eventId]
+  );
+  const event = eventResult.rows[0];
+  if (!event) return 'Event not found';
+
+  const now = Date.now();
+  if ((event.start_time && now < new Date(event.start_time).getTime()) ||
+      (event.end_time && now > new Date(event.end_time).getTime())) {
+    return 'Photo uploads are not available outside the event schedule';
+  }
+
+  const participantResult = await pool.query(
+    'SELECT 1 FROM participants WHERE id = $1 AND event_id = $2',
+    [participantId, eventId]
+  );
+  if (participantResult.rows.length === 0) return 'Participant does not belong to this event';
+
+  const existingPhoto = await pool.query<{ event_id: string; participant_id: string }>(
+    'SELECT event_id, participant_id FROM photos WHERE id = $1',
+    [photoId]
+  );
+  if (existingPhoto.rows.length > 0) {
+    const existing = existingPhoto.rows[0];
+    return existing.event_id === eventId && existing.participant_id === participantId
+      ? null
+      : 'Photo ID is already associated with another event or participant';
+  }
+
+  const photoCount = await pool.query<{ count: string }>(
+    'SELECT COUNT(*)::text AS count FROM photos WHERE event_id = $1 AND participant_id = $2',
+    [eventId, participantId]
+  );
+  return Number(photoCount.rows[0].count) >= event.photo_limit
+    ? 'This guest has reached the photo limit for the event'
+    : null;
+}
+
 // Configure multer for file uploads
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
 
@@ -165,6 +211,11 @@ router.post('/:eventId/photos-json', async (req, res) => {
   const filePath = join(uploadPath, filename);
 
   try {
+    const uploadError = await getPhotoUploadError(eventId, participantId, photoId);
+    if (uploadError) {
+      return res.status(uploadError === 'Event not found' ? 404 : 409).json({ error: uploadError });
+    }
+
     if (!existsSync(uploadPath)) {
       mkdirSync(uploadPath, { recursive: true });
     }
@@ -310,6 +361,12 @@ router.post('/:eventId/photos', async (req, res) => {
         if (!uploadedFilePath || !existsSync(uploadedFilePath)) {
           console.error('[Photo Upload] ❌ No file uploaded');
           return res.status(400).json({ error: 'No photo file uploaded' });
+        }
+
+        const uploadError = await getPhotoUploadError(eventId, participantId, photoId);
+        if (uploadError) {
+          unlinkSync(uploadedFilePath);
+          return res.status(uploadError === 'Event not found' ? 404 : 409).json({ error: uploadError });
         }
         
         // Rename file from temp name to photoId

@@ -5,6 +5,9 @@ export interface Event {
   name: string;
   date: Date;
   guest_limit: number;
+  photo_limit: number;
+  start_time: Date | null;
+  end_time: Date | null;
   host_code: string;
   created_at: Date;
   updated_at: Date;
@@ -39,6 +42,9 @@ export interface CreateEventRequest {
   name: string;
   date: string;
   guest_limit?: number;
+  photo_limit?: number;
+  start_time?: string;
+  end_time?: string;
   host_code: string;
 }
 

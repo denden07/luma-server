@@ -20,10 +20,10 @@ router.get('/', async (req, res) => {
     query += ' ORDER BY created_at DESC';
     
     const result = await pool.query<Event>(query, params);
-    res.json(result.rows);
+    return res.json(result.rows);
   } catch (error) {
     console.error('Error fetching events:', error);
-    res.status(500).json({ error: 'Failed to fetch events' });
+    return res.status(500).json({ error: 'Failed to fetch events' });
   }
 });
 
@@ -40,17 +40,25 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Event not found' });
     }
     
-    res.json(result.rows[0]);
+    return res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching event:', error);
-    res.status(500).json({ error: 'Failed to fetch event' });
+    return res.status(500).json({ error: 'Failed to fetch event' });
   }
 });
 
 // POST /api/events - Create a new event
 router.post('/', async (req, res) => {
   try {
-    const { name, date, guest_limit = 50, host_code }: CreateEventRequest = req.body;
+    const {
+      name,
+      date,
+      guest_limit = 30,
+      photo_limit = 20,
+      start_time,
+      end_time,
+      host_code,
+    }: CreateEventRequest = req.body;
     
     if (!name || !date) {
       return res.status(400).json({ error: 'Name and date are required' });
@@ -59,18 +67,34 @@ router.post('/', async (req, res) => {
     if (!host_code) {
       return res.status(400).json({ error: 'Host code is required' });
     }
+
+    if (guest_limit < 1 || guest_limit > 30 || photo_limit < 1 || photo_limit > 20) {
+      return res.status(400).json({ error: 'Events are limited to 30 guests and 20 photos per guest' });
+    }
+
+    if (start_time && end_time && new Date(start_time) >= new Date(end_time)) {
+      return res.status(400).json({ error: 'The event end time must be after the start time' });
+    }
+
+    const eventCount = await pool.query<{ count: string }>(
+      'SELECT COUNT(*)::text AS count FROM events WHERE host_code = $1',
+      [host_code]
+    );
+    if (Number(eventCount.rows[0].count) >= 2) {
+      return res.status(409).json({ error: 'This host already has the maximum of two events' });
+    }
     
     const result = await pool.query<Event>(
-      `INSERT INTO events (name, date, guest_limit, host_code) 
-       VALUES ($1, $2, $3, $4) 
+      `INSERT INTO events (name, date, guest_limit, photo_limit, start_time, end_time, host_code) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
        RETURNING *`,
-      [name, date, guest_limit, host_code]
+      [name, date, guest_limit, photo_limit, start_time || null, end_time || null, host_code]
     );
     
-    res.status(201).json(result.rows[0]);
+    return res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating event:', error);
-    res.status(500).json({ error: 'Failed to create event' });
+    return res.status(500).json({ error: 'Failed to create event' });
   }
 });
 
