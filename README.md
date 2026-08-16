@@ -50,7 +50,9 @@ Server runs on http://localhost:3000
 
 ### Photos
 - `GET /api/events/:eventId/photos` - Get all photos for an event
+- `GET /api/events/:eventId/photos/download` - Stream all event photos as `madetogether-event-photos.zip`
 - `POST /api/events/:eventId/photos` - Upload a photo (multipart/form-data)
+- `POST /api/events/:eventId/photos-json` - iOS JSON/base64 upload fallback
 - `GET /api/photos/:id` - Get a single photo
 - `DELETE /api/photos/:id` - Delete a photo
 
@@ -60,6 +62,9 @@ Server runs on http://localhost:3000
 ## File Storage
 
 Uploaded photos are stored in `./uploads/events/{eventId}/photos/`
+
+ZIP downloads are streamed directly to the response using `archiver`; no ZIP archive is
+retained on disk after the request completes.
 
 ## Database Schema
 
