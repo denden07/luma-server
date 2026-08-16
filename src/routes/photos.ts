@@ -1,8 +1,9 @@
 import express from 'express';
 import multer from 'multer';
 import busboy from 'busboy';
+import * as archiver from 'archiver';
 import { mkdirSync, existsSync, renameSync, unlinkSync, createWriteStream, writeFileSync } from 'fs';
-import { join } from 'path';
+import { basename, extname, join } from 'path';
 import pool from '../db/index.js';
 import type { Photo } from '../types.js';
 
@@ -176,6 +177,62 @@ router.get('/:eventId/photos', async (req, res) => {
   } catch (error) {
     console.error('Error fetching photos:', error);
     res.status(500).json({ error: 'Failed to fetch photos' });
+  }
+});
+
+// GET /api/events/:eventId/photos/download - Download all event photos as one ZIP file
+router.get('/:eventId/photos/download', async (req, res) => {
+  const { eventId } = req.params;
+
+  try {
+    const result = await pool.query<Photo & { participant_name?: string }>(
+      `SELECT p.*, pt.name AS participant_name
+       FROM photos p
+       JOIN participants pt ON p.participant_id = pt.id
+       WHERE p.event_id = $1
+       ORDER BY p.created_at ASC`,
+      [eventId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No photos are available for this event' });
+    }
+
+    res.attachment('madetogether-event-photos.zip');
+    res.type('application/zip');
+
+    const archive = new archiver.ZipArchive({ zlib: { level: 9 } });
+    archive.on('warning', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') {
+        console.error('ZIP archive warning:', error);
+      }
+    });
+    archive.on('error', (error: Error) => {
+      console.error('ZIP archive failed:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Could not prepare the photo download' });
+      } else {
+        res.destroy(error);
+      }
+    });
+
+    archive.pipe(res);
+    for (const photo of result.rows) {
+      const relativePath = photo.storage_path.replace(/^[/\\]+/, '');
+      const filePath = join(UPLOAD_DIR, relativePath);
+      if (!existsSync(filePath)) continue;
+
+      const participantName = (photo.participant_name || 'guest').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+      const extension = extname(basename(filePath)) || '.jpg';
+      archive.file(filePath, { name: `${participantName}-${photo.id}${extension}` });
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    console.error('Error creating photo ZIP:', error);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Could not prepare the photo download' });
+    }
   }
 });
 
